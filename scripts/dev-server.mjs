@@ -7,6 +7,13 @@ import { fileURLToPath } from "node:url";
 const PORT = Number(process.env.PORT || 8080);
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PROXY_PATH = "/__refrakt_proxy__";
+const INSECURE_TLS = process.env.REFRAKT_INSECURE_TLS === "1";
+
+if (INSECURE_TLS) {
+  // Dev-only escape hatch for corporate MITM/self-signed cert environments.
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  console.warn("[refrakt] REFRAKT_INSECURE_TLS=1 enabled: TLS certificate verification is disabled.");
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -92,11 +99,16 @@ async function handleProxy(req, res, url) {
     upstream = await fetch(parsed, { method, headers, body, redirect: "manual" });
   } catch (err) {
     res.writeHead(502, { "content-type": "text/plain; charset=utf-8", ...corsHeaders() });
+    const causeText = err instanceof Error && "cause" in err ? String(err.cause) : "";
+    const tlsHint = causeText.includes("certificate")
+      ? "TLS hint: set NODE_EXTRA_CA_CERTS to your corporate/root CA, or use REFRAKT_INSECURE_TLS=1 for local dev only."
+      : undefined;
     const details = {
       message: err instanceof Error ? err.message : String(err),
-      cause: err instanceof Error && "cause" in err ? String(err.cause) : undefined,
+      cause: causeText || undefined,
       target: parsed.toString(),
-      method
+      method,
+      tlsHint
     };
     res.end(`Upstream fetch failed: ${JSON.stringify(details)}`);
     return;
