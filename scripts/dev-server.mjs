@@ -114,13 +114,33 @@ async function handleProxy(req, res, url) {
     return;
   }
 
-  const outHeaders = Object.fromEntries(upstream.headers.entries());
-  delete outHeaders["content-length"];
+  const data = Buffer.from(await upstream.arrayBuffer());
+
+  const outHeaders = {};
+  for (const [key, value] of upstream.headers.entries()) {
+    const lower = key.toLowerCase();
+    if (
+      [
+        "content-length",
+        "content-encoding",
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "trailer",
+        "upgrade"
+      ].includes(lower)
+    ) {
+      continue;
+    }
+    outHeaders[key] = value;
+  }
+  outHeaders["content-length"] = String(data.length);
   outHeaders["access-control-allow-origin"] = "*";
   outHeaders["access-control-allow-methods"] = "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS";
   outHeaders["access-control-allow-headers"] = "*";
 
-  const data = Buffer.from(await upstream.arrayBuffer());
   res.writeHead(upstream.status, outHeaders);
   res.end(data);
 }
