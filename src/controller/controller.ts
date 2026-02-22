@@ -30,14 +30,24 @@ export class WebrascalController extends EventTarget {
     const db = await openDatabase();
     await saveConfig(db, this.config);
 
-    if (navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        webrascal$type: "loadConfig",
-        config: this.config
-      } satisfies MessageW2C);
+    const sw = globalThis.navigator?.serviceWorker;
+    if (!sw) {
+      return;
     }
 
-    navigator.serviceWorker.addEventListener("message", (ev) => {
+    const payload = {
+      webrascal$type: "loadConfig",
+      config: this.config
+    } satisfies MessageW2C;
+
+    if (sw.controller) {
+      sw.controller.postMessage(payload);
+    } else {
+      const registration = await sw.ready.catch(() => null);
+      registration?.active?.postMessage(payload);
+    }
+
+    sw.addEventListener("message", (ev) => {
       const data = ev.data as MessageW2C;
       if (data?.webrascal$type === "download") {
         this.dispatchEvent(new WebrascalGlobalDownloadEvent(data.url, data.filename));
