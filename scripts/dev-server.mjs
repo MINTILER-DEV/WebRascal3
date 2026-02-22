@@ -71,7 +71,12 @@ async function handleProxy(req, res, url) {
   for (const [key, value] of Object.entries(req.headers)) {
     if (!value) continue;
     const lower = key.toLowerCase();
-    if (["host", "connection", "content-length"].includes(lower)) continue;
+    if (
+      ["host", "connection", "content-length", "x-webrascal-target", "accept-encoding"].includes(lower) ||
+      lower.startsWith("sec-")
+    ) {
+      continue;
+    }
     if (Array.isArray(value)) {
       headers.set(key, value.join(", "));
     } else {
@@ -87,7 +92,13 @@ async function handleProxy(req, res, url) {
     upstream = await fetch(parsed, { method, headers, body, redirect: "manual" });
   } catch (err) {
     res.writeHead(502, { "content-type": "text/plain; charset=utf-8", ...corsHeaders() });
-    res.end(`Upstream fetch failed: ${String(err)}`);
+    const details = {
+      message: err instanceof Error ? err.message : String(err),
+      cause: err instanceof Error && "cause" in err ? String(err.cause) : undefined,
+      target: parsed.toString(),
+      method
+    };
+    res.end(`Upstream fetch failed: ${JSON.stringify(details)}`);
     return;
   }
 
