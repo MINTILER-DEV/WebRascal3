@@ -142,10 +142,12 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
     stage = "rewrite-body";
     const contentType = upstream.headers.get("content-type") || "";
     const destination = request.destination;
+    const isNavigatingDocument = destination === "document" || destination === "iframe" || request.mode === "navigate";
+    const isHtml = contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 
     stage = "rewrite-body:read-upstream-buffer";
     let bodyBytes = new Uint8Array(await upstream.arrayBuffer());
-    if ((destination === "document" || destination === "iframe") && contentType.includes("text/html")) {
+    if (isNavigatingDocument && isHtml) {
       stage = "rewrite-body:decode-html-text";
       const html = new TextDecoder().decode(bodyBytes);
       stage = "rewrite-body:html";
