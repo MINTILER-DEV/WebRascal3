@@ -3,7 +3,7 @@ members = ["js", "transform", "native", "wasm"]
 resolver = "2"
 
 [workspace.dependencies]
-oxc = { version = "0.71", features = ["full"] }
+oxc = { version = "0.114", features = ["full"] }
 smallvec = "1.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

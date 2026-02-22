@@ -18,15 +18,15 @@ struct Token<'a> {
 }
 
 #[derive(Debug)]
-pub struct JsVisitor<'alloc, 'data, E: UrlRewriter> {
+pub struct JsVisitor<'data, E: UrlRewriter> {
     src: &'data str,
     cfg: &'data Config,
     flags: &'data Flags,
     _url: &'data E,
-    rewrites: Vec<Rewrite<'alloc, 'data>>,
+    rewrites: Vec<Rewrite>,
 }
 
-impl<'alloc, 'data, E: UrlRewriter> JsVisitor<'alloc, 'data, E> {
+impl<'data, E: UrlRewriter> JsVisitor<'data, E> {
     pub fn new(src: &'data str, cfg: &'data Config, flags: &'data Flags, url: &'data E) -> Self {
         Self {
             src,
@@ -37,7 +37,7 @@ impl<'alloc, 'data, E: UrlRewriter> JsVisitor<'alloc, 'data, E> {
         }
     }
 
-    pub fn run(mut self) -> Vec<Rewrite<'alloc, 'data>> {
+    pub fn run(mut self) -> Vec<Rewrite> {
         self.visit_identifier_reference();
         self.visit_member_expression();
         self.visit_import_expression();
@@ -130,7 +130,10 @@ impl<'alloc, 'data, E: UrlRewriter> JsVisitor<'alloc, 'data, E> {
             if !UNSAFE_GLOBALS.contains(&tok.text) {
                 continue;
             }
-            let is_decl_context = matches!(tok.prev_token, Some("function" | "var" | "let" | "const" | "catch" | "class"));
+            let is_decl_context = matches!(
+                tok.prev_token,
+                Some("function" | "var" | "let" | "const" | "catch" | "class")
+            );
             if is_decl_context {
                 continue;
             }
@@ -138,6 +141,9 @@ impl<'alloc, 'data, E: UrlRewriter> JsVisitor<'alloc, 'data, E> {
                 continue;
             }
             if tok.next_non_ws == Some(':') {
+                continue;
+            }
+            if is_binding_like(self.src, tok.start as usize, tok.end as usize) {
                 continue;
             }
 
@@ -156,7 +162,9 @@ impl<'alloc, 'data, E: UrlRewriter> JsVisitor<'alloc, 'data, E> {
             if UNSAFE_GLOBALS.contains(&tok.text) {
                 self.rewrites.push(Rewrite {
                     span: Span::new(tok.start, tok.end),
-                    ty: RewriteType::RewriteProperty { ident: tok.text },
+                    ty: RewriteType::RewriteProperty {
+                        ident: tok.text.to_string(),
+                    },
                 });
             } else if tok.text == "postMessage" {
                 self.rewrites.push(Rewrite {
@@ -166,11 +174,18 @@ impl<'alloc, 'data, E: UrlRewriter> JsVisitor<'alloc, 'data, E> {
             }
         }
 
-        // Best-effort computed member rewriting.
         let mut i = 0usize;
         let bytes = self.src.as_bytes();
         while i < bytes.len() {
             if bytes[i] as char == '[' {
+                let prev = find_prev_non_ws(self.src, i);
+                let should_wrap = matches!(prev, Some('.' | ')' | ']'))
+                    || prev.map(is_ident_continue).unwrap_or(false)
+                    || matches!(prev, Some('"' | '\''));
+                if !should_wrap {
+                    i += 1;
+                    continue;
+                }
                 let start = i + 1;
                 let mut depth = 1usize;
                 i += 1;
@@ -255,7 +270,7 @@ impl<'alloc, 'data, E: UrlRewriter> JsVisitor<'alloc, 'data, E> {
         }
     }
 
-    pub fn rewrite_url(&mut self, start: u32, end: u32, text: &'alloc str, module: bool) {
+    pub fn rewrite_url(&mut self, start: u32, end: u32, text: String, module: bool) {
         let _ = module;
         self.rewrites.push(Rewrite {
             span: Span::new(start, end),
@@ -330,4 +345,71 @@ fn find_next_non_ws(src: &str, mut idx: usize) -> Option<char> {
         idx += 1;
     }
     None
+}
+
+fn is_binding_like(src: &str, start: usize, end: usize) -> bool {
+    let prev = find_prev_non_ws(src, start);
+    let next = find_next_non_ws(src, end);
+
+    if matches!(prev, Some('{' | '[' | ',')) && matches!(next, Some('}' | ']' | ',' | '=')) {
+        return true;
+    }
+
+    if prev == Some('(') {
+        // Function and catch parameter bindings should not be rewritten.
+        let before = previous_words_before(src, start.saturating_sub(1));
+        if before.iter().any(|w| matches!(*w, "function" | "catch")) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn previous_words_before(src: &str, mut idx: usize) -> Vec<&str> {
+    let mut out = Vec::new();
+    for _ in 0..3 {
+        while idx > 0 {
+            let ch = src.as_bytes()[idx] as char;
+            if !ch.is_whitespace() && ch != '(' {
+                break;
+            }
+            idx = idx.saturating_sub(1);
+            if idx == 0 {
+                break;
+            }
+        }
+        if idx == 0 && !((src.as_bytes()[0] as char).is_ascii_alphanumeric() || src.as_bytes()[0] as char == '_') {
+            break;
+        }
+
+        let mut end = idx + 1;
+        while end > 0 && end <= src.len() {
+            let ch = src.as_bytes()[end - 1] as char;
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' {
+                break;
+            }
+            if end == 1 {
+                break;
+            }
+            end -= 1;
+        }
+
+        let mut start_word = end;
+        while start_word > 0 {
+            let ch = src.as_bytes()[start_word - 1] as char;
+            if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '$') {
+                break;
+            }
+            start_word -= 1;
+        }
+
+        if start_word < end {
+            out.push(&src[start_word..end]);
+            idx = start_word.saturating_sub(1);
+        } else {
+            break;
+        }
+    }
+    out
 }

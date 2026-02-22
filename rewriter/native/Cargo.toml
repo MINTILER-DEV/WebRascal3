@@ -1,0 +1,14 @@
+[package]
+name = "native"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+js = { workspace = true }
+anyhow = { workspace = true }
+boa_engine = "0.20"
+clap = { version = "4", features = ["derive"] }
+walkdir = "2"
+
+[lints]
+workspace = true

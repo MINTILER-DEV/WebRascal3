@@ -1,5 +1,4 @@
 use oxc::span::Span;
-use smallvec::SmallVec;
 
 use crate::{changes::JsChange, cfg::Config};
 
@@ -13,66 +12,53 @@ pub enum AssignmentOp {
 }
 
 #[derive(Debug, Clone)]
-pub enum RewriteType<'alloc, 'data> {
+pub enum RewriteType {
     WrapFn { enclose: bool },
     SetRealmFn,
     ImportFn,
     MetaFn,
-    RewriteProperty {
-        ident: &'data str,
-    },
-    RebindProperty {
-        ident: &'data str,
-        tempvar: bool,
-    },
+    RewriteProperty { ident: String },
+    RebindProperty { ident: String, tempvar: bool },
     TempVar,
     WrapObjectAssignment {
-        restids: SmallVec<[&'data str; 4]>,
+        restids: Vec<String>,
         location_assigned: bool,
     },
     WrapProperty,
-    RascalErr {
-        ident: &'data str,
-    },
+    RascalErr { ident: String },
     Rascalitize,
-    Eval {
-        inner: Span,
-    },
+    Eval { inner: Span },
     Assignment {
-        name: &'data str,
-        rhs: Span,
+        name: String,
+        rhs_text: String,
         op: AssignmentOp,
     },
-    ShorthandObj {
-        name: &'data str,
-    },
+    ShorthandObj { name: String },
     SourceTag,
     CleanFunction {
-        restids: SmallVec<[&'data str; 4]>,
+        restids: Vec<String>,
         expression: bool,
         location_assigned: bool,
         wrap: bool,
     },
     CleanVariableDeclaration {
-        restids: SmallVec<[&'data str; 4]>,
+        restids: Vec<String>,
         location_assigned: bool,
     },
-    Replace {
-        text: &'alloc str,
-    },
+    Replace { text: String },
     Delete,
 }
 
 #[derive(Debug, Clone)]
-pub struct Rewrite<'alloc, 'data> {
+pub struct Rewrite {
     pub span: Span,
-    pub ty: RewriteType<'alloc, 'data>,
+    pub ty: RewriteType,
 }
 
-impl<'alloc, 'data> Rewrite<'alloc, 'data> {
-    pub fn into_inner(self, cfg: &'data Config) -> SmallVec<[JsChange<'alloc, 'data>; 2]> {
+impl Rewrite {
+    pub fn into_inner(self, cfg: &Config) -> Vec<JsChange> {
         use RewriteType as R;
-        let mut out: SmallVec<[JsChange<'alloc, 'data>; 2]> = SmallVec::new();
+        let mut out: Vec<JsChange> = Vec::new();
         match self.ty {
             R::WrapFn { enclose } => {
                 let left = if enclose {
@@ -82,7 +68,7 @@ impl<'alloc, 'data> Rewrite<'alloc, 'data> {
                 };
                 let right = if enclose { "))" } else { ")" };
                 out.push(JsChange::insert_left_owned(self.span, left));
-                out.push(JsChange::insert_right(self.span, right));
+                out.push(JsChange::insert_right(self.span, right.to_string()));
             }
             R::SetRealmFn => {
                 out.push(JsChange::replace_owned(
@@ -109,10 +95,14 @@ impl<'alloc, 'data> Rewrite<'alloc, 'data> {
                 ));
             }
             R::RebindProperty { ident, tempvar } => {
-                let target = if tempvar { cfg.templocid.as_str() } else { ident };
+                let target = if tempvar {
+                    cfg.templocid.clone()
+                } else {
+                    ident.clone()
+                };
                 out.push(JsChange::replace_owned(
                     self.span,
-                    format!("{}: {}", format!("{}{}", cfg.wrappropertybase, ident), target),
+                    format!("{}{}: {}", cfg.wrappropertybase, ident, target),
                 ));
             }
             R::TempVar => {
@@ -134,38 +124,39 @@ impl<'alloc, 'data> Rewrite<'alloc, 'data> {
                 };
                 let prefix = format!("((t)=>({}{}))(", rest, loc);
                 out.push(JsChange::insert_left_owned(self.span, prefix));
-                out.push(JsChange::insert_right(self.span, ")"));
+                out.push(JsChange::insert_right(self.span, ")".to_string()));
             }
             R::WrapProperty => {
                 out.push(JsChange::insert_left_owned(
                     self.span,
                     format!("{}(", cfg.wrappropertyfn),
                 ));
-                out.push(JsChange::insert_right(self.span, ")"));
+                out.push(JsChange::insert_right(self.span, ")".to_string()));
             }
             R::RascalErr { ident } => {
-                out.push(JsChange::insert_left_owned(
-                    self.span,
-                    format!("$rascalerr({});", ident),
-                ));
+                out.push(JsChange::rascal_err(self.span, format!("$rascalerr({ident});")));
             }
             R::Rascalitize => {
                 out.push(JsChange::insert_left_owned(self.span, "$rascalitize(".to_string()));
-                out.push(JsChange::insert_right(self.span, ")"));
+                out.push(JsChange::insert_right(self.span, ")".to_string()));
             }
             R::Eval { inner } => {
                 out.push(JsChange::insert_left_owned(
                     inner,
                     format!("{}(", cfg.rewritefn),
                 ));
-                out.push(JsChange::insert_right(inner, ")"));
+                out.push(JsChange::insert_right(inner, ")".to_string()));
             }
-            R::Assignment { name, rhs, op: _ } => {
+            R::Assignment {
+                name,
+                rhs_text,
+                op: _,
+            } => {
                 out.push(JsChange::replace_owned(
                     self.span,
                     format!(
                         "((t)=>{}({},\"=\",t)||({}=t))({})",
-                        cfg.trysetfn, name, name, rhs.start
+                        cfg.trysetfn, name, name, rhs_text
                     ),
                 ));
             }
@@ -199,10 +190,10 @@ impl<'alloc, 'data> Rewrite<'alloc, 'data> {
                 }
                 if expression {
                     out.push(JsChange::insert_left_owned(self.span, format!("({},", body)));
-                    out.push(JsChange::insert_right(self.span, ")"));
+                    out.push(JsChange::insert_right(self.span, ")".to_string()));
                 } else if wrap {
                     out.push(JsChange::insert_left_owned(self.span, format!("{{{}", body)));
-                    out.push(JsChange::insert_right(self.span, "}"));
+                    out.push(JsChange::insert_right(self.span, "}".to_string()));
                 } else {
                     out.push(JsChange::insert_left_owned(self.span, format!(";{}", body)));
                 }
@@ -226,8 +217,8 @@ impl<'alloc, 'data> Rewrite<'alloc, 'data> {
                     format!(", {} = ({}, 0)", cfg.tempunusedid, suffix),
                 ));
             }
-            R::Replace { text } => out.push(JsChange::replace(self.span, text)),
-            R::Delete => out.push(JsChange::replace(self.span, "")),
+            R::Replace { text } => out.push(JsChange::replace_owned(self.span, text)),
+            R::Delete => out.push(JsChange::replace_owned(self.span, String::new())),
         }
         out
     }

@@ -1,0 +1,23 @@
+{
+  "name": "refrakt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rspack build",
+    "dev": "rspack build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mercuryworkshop/bare-mux": "^2.1.6",
+    "dom-serializer": "^2.0.0",
+    "domhandler": "^5.0.3",
+    "htmlparser2": "^10.0.0",
+    "set-cookie-parser": "^2.7.1"
+  },
+  "devDependencies": {
+    "@rspack/cli": "^1.2.0",
+    "@rspack/core": "^1.2.0",
+    "typescript": "^5.7.0"
+  }
+}

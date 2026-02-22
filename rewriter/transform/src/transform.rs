@@ -17,6 +17,7 @@ pub struct TransformLL<'a> {
 #[derive(Debug, Clone)]
 pub enum TransformElement<'a> {
     Str(&'a str),
+    Owned(String),
     U32(u32),
 }
 

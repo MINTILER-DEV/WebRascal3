@@ -1,5 +1,5 @@
 use oxc::span::Span;
-use smallvec::SmallVec;
+use std::marker::PhantomData;
 
 pub mod transform;
 
@@ -7,10 +7,10 @@ pub use transform::{
     Transform, TransformElement, TransformLL, TransformOutput, TransformRecord, TransformType,
 };
 
-#[derive(Debug)]
 pub struct Transformer<'alloc, 'data, T: Transform<'data>> {
     pub alloc: Option<&'alloc oxc::allocator::Allocator>,
     inner: Vec<T>,
+    marker: PhantomData<&'data ()>,
 }
 
 impl<'alloc, 'data, T: Transform<'data>> Default for Transformer<'alloc, 'data, T> {
@@ -18,6 +18,7 @@ impl<'alloc, 'data, T: Transform<'data>> Default for Transformer<'alloc, 'data, 
         Self {
             alloc: None,
             inner: Vec::new(),
+            marker: PhantomData,
         }
     }
 }
@@ -27,6 +28,7 @@ impl<'alloc, 'data, T: Transform<'data>> Transformer<'alloc, 'data, T> {
         Self {
             alloc: Some(alloc),
             inner: Vec::new(),
+            marker: PhantomData,
         }
     }
 
@@ -81,6 +83,7 @@ impl<'alloc, 'data, T: Transform<'data>> Transformer<'alloc, 'data, T> {
             for item in ll.change {
                 match item {
                     TransformElement::Str(s) => rendered.extend_from_slice(s.as_bytes()),
+                    TransformElement::Owned(s) => rendered.extend_from_slice(s.as_bytes()),
                     TransformElement::U32(v) => rendered.extend_from_slice(v.to_string().as_bytes()),
                 }
             }
