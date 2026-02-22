@@ -1,5 +1,6 @@
 import { DefinePlugin } from "@rspack/core";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import pkg from "./package.json" with { type: "json" };
 
 const commitHash = (() => {
@@ -19,10 +20,10 @@ export default {
   entry: {
     "webrascal.all": "./src/entry.ts",
     "webrascal.worker": "./src/worker/index.ts",
-    "webrascal.controller": "./src/controller/controller.ts"
+    "webrascal.controller": "./src/controller/entry.ts"
   },
   output: {
-    path: new URL("./dist", import.meta.url).pathname,
+    path: fileURLToPath(new URL("./dist", import.meta.url)),
     filename: "[name].js",
     library: {
       type: "global"
