@@ -79,7 +79,7 @@ export class WebrascalServiceWorker extends EventTarget {
 
   route({ request }: FetchEvent): boolean {
     const url = new URL(request.url);
-    return url.pathname.startsWith(this.config.prefix) || request.destination === "document";
+    return url.pathname.startsWith(this.config.prefix);
   }
 
   async fetch(event: FetchEvent): Promise<Response> {
