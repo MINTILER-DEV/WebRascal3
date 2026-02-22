@@ -27,7 +27,7 @@ export function rewriteHtml(input: string, meta: URLMeta, fromTop = false): stri
     const runtimeConfig = config ?? fallbackConfig();
     const bootstrap = [
       `<script>self.__WEBRASCAL_CONFIG__=${inlineJson(runtimeConfig)};</script>`,
-      `<script src="${configuredFile("wasm")}"></script>`,
+      `<script type="module" src="${configuredFile("wasm")}"></script>`,
       `<script src="${configuredFile("all")}"></script>`,
       `<script>if (self.$webrascalLoadClient) { self.$webrascalLoadClient().loadAndHook(self.__WEBRASCAL_CONFIG__); }</script>`
     ].join("");

@@ -151,14 +151,20 @@ export class WebrascalClient {
   }
 
   RawTrap(target: object, prop: PropertyKey, descriptor: PropertyDescriptor): void {
-    Object.defineProperty(target, prop, {
+    const out: PropertyDescriptor = {
       configurable: true,
-      enumerable: descriptor.enumerable ?? false,
-      get: descriptor.get,
-      set: descriptor.set,
-      writable: descriptor.writable,
-      value: descriptor.value
-    });
+      enumerable: descriptor.enumerable ?? false
+    };
+
+    if (descriptor.get || descriptor.set) {
+      out.get = descriptor.get;
+      out.set = descriptor.set;
+    } else {
+      out.writable = descriptor.writable ?? true;
+      out.value = descriptor.value;
+    }
+
+    Object.defineProperty(target, prop, out);
   }
 
   get url(): URL {
