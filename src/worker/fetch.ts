@@ -7,6 +7,7 @@ import { renderErrorPage, renderNetErrorPage, type NetErrorPageInput } from "./e
 export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent): Promise<Response> {
   const request = event.request;
   let stage = "start";
+  let resolvedRealUrl = "";
 
   try {
     stage = "parse-request-url";
@@ -23,6 +24,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
 
     stage = "decode-proxied-url";
     const realUrl = unrewriteUrl(request.url);
+    resolvedRealUrl = realUrl;
     if (realUrl.startsWith(self.location.origin)) {
       return simpleErrorResponse(
         400,
@@ -139,14 +141,23 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
     const contentType = upstream.headers.get("content-type") || "";
     const destination = request.destination;
 
+    stage = "rewrite-body:read-upstream-buffer";
     let bodyBytes = new Uint8Array(await upstream.arrayBuffer());
     if ((destination === "document" || destination === "iframe") && contentType.includes("text/html")) {
-      bodyBytes = new TextEncoder().encode(rewriteHtml(new TextDecoder().decode(bodyBytes), meta, true));
+      stage = "rewrite-body:decode-html-text";
+      const html = new TextDecoder().decode(bodyBytes);
+      stage = "rewrite-body:html";
+      bodyBytes = new TextEncoder().encode(rewriteHtml(html, meta, true));
     } else if (destination === "script") {
+      stage = "rewrite-body:js";
       bodyBytes = new TextEncoder().encode(rewriteJs(bodyBytes, realUrl, meta, requestUrl.searchParams.get("type") === "module"));
     } else if (destination === "style") {
-      bodyBytes = new TextEncoder().encode(rewriteCss(new TextDecoder().decode(bodyBytes), meta));
+      stage = "rewrite-body:decode-css-text";
+      const css = new TextDecoder().decode(bodyBytes);
+      stage = "rewrite-body:css";
+      bodyBytes = new TextEncoder().encode(rewriteCss(css, meta));
     } else if (destination === "worker" || destination === "sharedworker") {
+      stage = "rewrite-body:worker";
       bodyBytes = rewriteWorkers(bodyBytes, destination as "worker" | "sharedworker", realUrl, meta);
     }
 
@@ -170,6 +181,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         status: 502,
         method: request.method,
         requestUrl: request.url,
+        realUrl: resolvedRealUrl,
         destination: request.destination,
         details: {
           stage,
