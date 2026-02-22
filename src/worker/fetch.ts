@@ -31,7 +31,8 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         "A proxied route resolved to the app origin and was blocked by policy.",
         "WRK-SAFE-1001",
         "Blocked Same-Origin Escape",
-        request.destination
+        request.destination,
+        request.mode
       );
     }
 
@@ -85,7 +86,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
           "Check that the host process can reach the target over HTTPS.",
           "Inspect the dev server terminal for low-level network errors."
         ]
-      }, request.destination);
+      }, request.destination, request.mode);
     }
 
     stage = "upstream-error-status-check";
@@ -113,7 +114,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
           "If using HTTPS targets, check certificate and DNS reachability from Node.",
           "Retry with a simpler target URL to isolate transport vs rewrite issues."
         ]
-      }, request.destination);
+      }, request.destination, request.mode);
     }
 
     stage = "rewrite-headers";
@@ -198,14 +199,15 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
           "Confirm no stale service worker version is active.",
           "Use the stage field to identify where the pipeline threw."
         ]
-      }, request.destination);
+      }, request.destination, request.mode);
     }
     return simpleErrorResponse(
       500,
       `The worker fetch pipeline failed unexpectedly at stage "${stage}". ${message}`,
       "WRK-CORE-5000",
       "Unhandled Worker Pipeline Error",
-      request.destination
+      request.destination,
+      request.mode
     );
   }
 }
@@ -215,9 +217,10 @@ function simpleErrorResponse(
   summary: string,
   code: string,
   title: string,
-  destination: RequestDestination
+  destination: RequestDestination,
+  mode: RequestMode
 ): Response {
-  const responseStatus = toRenderableStatus(status, destination);
+  const responseStatus = toRenderableStatus(status, destination, mode);
   return new Response(renderErrorPage(summary, code, title), {
     status: responseStatus,
     headers: {
@@ -228,8 +231,13 @@ function simpleErrorResponse(
   });
 }
 
-function netErrorResponse(status: number, payload: NetErrorPageInput, destination: RequestDestination): Response {
-  const responseStatus = toRenderableStatus(status, destination);
+function netErrorResponse(
+  status: number,
+  payload: NetErrorPageInput,
+  destination: RequestDestination,
+  mode: RequestMode
+): Response {
+  const responseStatus = toRenderableStatus(status, destination, mode);
   return new Response(renderNetErrorPage(payload), {
     status: responseStatus,
     headers: {
@@ -258,8 +266,8 @@ function normalizeStatus(status: number): number {
   return 502;
 }
 
-function toRenderableStatus(status: number, destination: RequestDestination): number {
-  if (destination === "document" || destination === "iframe") {
+function toRenderableStatus(status: number, destination: RequestDestination, mode: RequestMode): number {
+  if (destination === "document" || destination === "iframe" || mode === "navigate") {
     return 200;
   }
   return status;

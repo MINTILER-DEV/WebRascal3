@@ -67,13 +67,16 @@ export function renderErrorPage(summary: string, code = "WRK-0000", title = "Web
 }
 
 export function renderNetErrorPage(input: NetErrorPageInput): string {
+  const title = safeText(input.title, "WebRascal Network Error");
+  const summary = safeText(input.summary, "The request failed in the proxy pipeline.");
+  const code = safeText(input.code, "WRK-NET-0000");
   const payload = {
-    code: input.code,
+    code,
     status: input.status ?? 502,
-    method: input.method || "",
-    requestUrl: input.requestUrl || "",
-    realUrl: input.realUrl || "",
-    destination: input.destination || "",
+    method: safeText(input.method),
+    requestUrl: safeText(input.requestUrl),
+    realUrl: safeText(input.realUrl),
+    destination: safeText(input.destination),
     generatedAt: new Date().toISOString(),
     details: input.details || {}
   };
@@ -91,7 +94,7 @@ export function renderNetErrorPage(input: NetErrorPageInput): string {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${escapeHtml(input.title)}</title>
+    <title>${escapeHtml(title)}</title>
     <style>
       :root {
         --bg: #0c1018;
@@ -169,9 +172,9 @@ export function renderNetErrorPage(input: NetErrorPageInput): string {
   <body>
     <main class="wrap">
       <section class="top">
-        <span class="code">${escapeHtml(input.code)}</span>
-        <h1>${escapeHtml(input.title)}</h1>
-        <p>${escapeHtml(input.summary)}</p>
+        <span class="code">${escapeHtml(code)}</span>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(summary)}</p>
       </section>
       <section class="grid">
         <article class="panel">
@@ -195,4 +198,14 @@ function escapeHtml(input: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function safeText(input: unknown, fallback = ""): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input == null) {
+    return fallback;
+  }
+  return String(input);
 }
