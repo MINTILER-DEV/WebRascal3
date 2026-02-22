@@ -149,6 +149,9 @@ async function handleStatic(_req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/demo/index.html";
   if (pathname === "/demo") pathname = "/demo/index.html";
+  if (pathname === "/dist/webrascal.wasm.js") pathname = "/rewriter/wasm/pkg/wasm.js";
+  if (pathname === "/dist/wasm_bg.wasm") pathname = "/rewriter/wasm/pkg/wasm_bg.wasm";
+  if (pathname === "/dist/webrascal.wasm.wasm") pathname = "/rewriter/wasm/pkg/webrascal.wasm.wasm";
 
   const filePath = resolvePublicPath(pathname);
   if (!filePath) {

@@ -165,9 +165,13 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
     await cleanExpiredTrackers();
 
     stage = "respond";
+    const status = normalizeStatus(upstream.status);
+    const statusText = status === upstream.status
+      ? upstream.statusText
+      : (status === 502 ? "Bad Gateway" : "");
     return new Response(bodyBytes, {
-      status: upstream.status,
-      statusText: upstream.statusText,
+      status,
+      statusText,
       headers: rewrittenHeaders
     });
   } catch (err) {
@@ -227,4 +231,11 @@ async function safeBodyPreview(response: Response, contentType: string): Promise
   } catch (err) {
     return `<failed to read upstream body: ${err instanceof Error ? err.message : String(err)}>`;
   }
+}
+
+function normalizeStatus(status: number): number {
+  if (status >= 200 && status <= 599) {
+    return status;
+  }
+  return 502;
 }
