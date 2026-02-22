@@ -1,0 +1,14 @@
+[package]
+name = "js"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+oxc = { workspace = true }
+smallvec = { workspace = true }
+transform = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[lints]
+workspace = true
