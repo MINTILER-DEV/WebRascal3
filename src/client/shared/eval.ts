@@ -1,6 +1,6 @@
 import type { WebrascalClient } from "../../client";
-import { config } from "../../../shared";
-import { rewriteJs } from "../../../shared/rewriters/js";
+import { config } from "../../shared";
+import { rewriteJs } from "../../shared/rewriters/js";
 
 export function indirectEval(this: WebrascalClient, strict: boolean, js: unknown): unknown {
   if (typeof js !== "string") {

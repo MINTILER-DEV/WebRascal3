@@ -1,7 +1,7 @@
 import type { WebrascalClient } from "../../client";
-import { config, flagEnabled } from "../../../shared";
+import { config, flagEnabled } from "../../shared";
 import { indirectEval } from "./eval";
-import { WEBRASCALCLIENT } from "../../../symbols";
+import { WEBRASCALCLIENT } from "../../symbols";
 
 const UNSAFE_GLOBALS = new Set(["location", "parent", "top", "eval"]);
 
