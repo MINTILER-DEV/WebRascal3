@@ -6,8 +6,10 @@ import { renderErrorPage, renderNetErrorPage, type NetErrorPageInput } from "./e
 
 export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent): Promise<Response> {
   const request = event.request;
+  let stage = "start";
 
   try {
+    stage = "parse-request-url";
     const requestUrl = new URL(request.url);
 
     if (requestUrl.pathname.endsWith(".wasm") && requestUrl.pathname.includes("webrascal")) {
@@ -19,6 +21,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       });
     }
 
+    stage = "decode-proxied-url";
     const realUrl = unrewriteUrl(request.url);
     if (realUrl.startsWith(self.location.origin)) {
       return simpleErrorResponse(
@@ -29,9 +32,11 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       );
     }
 
+    stage = "prepare-upstream-request";
     const meta: URLMeta = { base: new URL(realUrl) };
     const headers = new Headers(request.headers);
 
+    stage = "tracker";
     try {
       const referrer = request.referrer || "";
       const initialSite = "cross-site";
@@ -42,11 +47,13 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       // ignore tracker failures
     }
 
+    stage = "attach-cookies";
     const cookies = sw.cookieStore.getCookies(new URL(realUrl));
     if (cookies) {
       headers.set("cookie", cookies);
     }
 
+    stage = "upstream-fetch";
     let upstream: Response;
     try {
       upstream = await sw.client.fetch(realUrl, {
@@ -78,11 +85,10 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       });
     }
 
+    stage = "upstream-error-status-check";
     if (upstream.status >= 500) {
       const contentType = upstream.headers.get("content-type") || "";
-      const payload = contentType.includes("text/")
-        ? (await upstream.text()).slice(0, 4000)
-        : `<binary payload ${upstream.status}>`;
+      const payload = await safeBodyPreview(upstream, contentType);
 
       return netErrorResponse(502, {
         code: "WRK-NET-2002",
@@ -107,24 +113,29 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       });
     }
 
+    stage = "rewrite-headers";
     const rewrittenHeaders = rewriteHeaders(upstream.headers, meta);
 
+    stage = "redirect-handling";
     const locationHeader = upstream.headers.get("location");
     if (locationHeader) {
       rewrittenHeaders.set("location", rewriteUrl(locationHeader, meta));
       await updateTracker(realUrl, locationHeader, upstream.headers.get("referrer-policy") || "");
     }
 
+    stage = "cookie-sync";
     const setCookies = upstream.headers.get("set-cookie");
     if (setCookies) {
       sw.cookieStore.setCookies([setCookies], new URL(realUrl));
     }
 
+    stage = "referrer-policy";
     const referrerPolicy = upstream.headers.get("referrer-policy");
     if (referrerPolicy) {
       await storeReferrerPolicy(realUrl, referrerPolicy, request.referrer);
     }
 
+    stage = "rewrite-body";
     const contentType = upstream.headers.get("content-type") || "";
     const destination = request.destination;
 
@@ -139,8 +150,10 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       bodyBytes = rewriteWorkers(bodyBytes, destination as "worker" | "sharedworker", realUrl, meta);
     }
 
+    stage = "cleanup";
     await cleanExpiredTrackers();
 
+    stage = "respond";
     return new Response(bodyBytes, {
       status: upstream.status,
       statusText: upstream.statusText,
@@ -148,9 +161,31 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const fetchLike = /fetch failed|failed to fetch/i.test(message);
+    if (fetchLike) {
+      return netErrorResponse(502, {
+        code: "WRK-NET-2999",
+        title: "Worker Fetch Pipeline Network Failure",
+        summary: "A fetch-related exception was thrown during pipeline execution.",
+        status: 502,
+        method: request.method,
+        requestUrl: request.url,
+        destination: request.destination,
+        details: {
+          stage,
+          error: message,
+          stack: err instanceof Error ? err.stack : undefined
+        },
+        tips: [
+          "Re-check dev transport endpoint and TLS settings (`npm run serve:insecure` for local testing).",
+          "Confirm no stale service worker version is active.",
+          "Use the stage field to identify where the pipeline threw."
+        ]
+      });
+    }
     return simpleErrorResponse(
       500,
-      `The worker fetch pipeline failed unexpectedly. ${message}`,
+      `The worker fetch pipeline failed unexpectedly at stage "${stage}". ${message}`,
       "WRK-CORE-5000",
       "Unhandled Worker Pipeline Error"
     );
@@ -169,4 +204,15 @@ function netErrorResponse(status: number, payload: NetErrorPageInput): Response 
     status,
     headers: { "content-type": "text/html; charset=utf-8" }
   });
+}
+
+async function safeBodyPreview(response: Response, contentType: string): Promise<string> {
+  try {
+    if (contentType.includes("text/") || contentType.includes("json")) {
+      return (await response.text()).slice(0, 4000);
+    }
+    return `<binary payload ${response.status}>`;
+  } catch (err) {
+    return `<failed to read upstream body: ${err instanceof Error ? err.message : String(err)}>`;
+  }
 }
