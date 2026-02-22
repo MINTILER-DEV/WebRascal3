@@ -129,37 +129,112 @@ self.addEventListener("fetch", (ev: FetchEvent) => {
       sw.fetch(ev).catch((err) => {
         const destination = ev.request.destination;
         const status = destination === "document" || destination === "iframe" || ev.request.mode === "navigate" ? 200 : 502;
-        return new Response(
-          renderNetErrorPage({
-            code: "WRK-CORE-5999",
-            title: "Unhandled Service Worker Fetch Rejection",
-            summary: "The fetch event handler rejected before building a normal proxy response.",
-            status: 502,
-            method: ev.request.method,
-            requestUrl: ev.request.url,
-            destination,
-            details: {
-              error: err instanceof Error ? err.message : String(err),
-              stack: err instanceof Error ? err.stack : undefined
-            },
-            tips: [
-              "Rebuild and hard-reload to ensure the latest worker bundle is active.",
-              "Use this payload to pinpoint failures that escaped pipeline-level catches.",
-              "Check server and worker console logs around this request URL."
-            ]
-          }),
-          {
-            status,
-            headers: {
-              "content-type": "text/html; charset=utf-8",
-              "x-webrascal-error-code": "WRK-CORE-5999",
-              "x-webrascal-error-status": "502"
+        try {
+          return new Response(
+            renderNetErrorPage({
+              code: "WRK-CORE-5999",
+              title: "Unhandled Service Worker Fetch Rejection",
+              summary: "The fetch event handler rejected before building a normal proxy response.",
+              status: 502,
+              method: ev.request.method,
+              requestUrl: ev.request.url,
+              destination,
+              details: {
+                error: err instanceof Error ? err.message : String(err),
+                stack: err instanceof Error ? err.stack : undefined
+              },
+              tips: [
+                "Rebuild and hard-reload to ensure the latest worker bundle is active.",
+                "Use this payload to pinpoint failures that escaped pipeline-level catches.",
+                "Check server and worker console logs around this request URL."
+              ]
+            }),
+            {
+              status,
+              headers: {
+                "content-type": "text/html; charset=utf-8",
+                "x-webrascal-error-code": "WRK-CORE-5999",
+                "x-webrascal-error-status": "502"
+              }
             }
-          }
-        );
+          );
+        } catch (renderErr) {
+          return new Response(
+            renderHardFallbackPage({
+              code: "WRK-CORE-5998",
+              title: "Emergency Error Fallback",
+              summary: "Primary error rendering failed, so WebRascal returned a minimal fallback page.",
+              requestUrl: ev.request.url,
+              method: ev.request.method,
+              details: {
+                originalError: err instanceof Error ? err.message : String(err),
+                renderError: renderErr instanceof Error ? renderErr.message : String(renderErr)
+              }
+            }),
+            {
+              status,
+              headers: {
+                "content-type": "text/html; charset=utf-8",
+                "x-webrascal-error-code": "WRK-CORE-5998",
+                "x-webrascal-error-status": "502"
+              }
+            }
+          );
+        }
       })
     );
   }
 });
 
 export { rewriteUrl, unrewriteUrl };
+
+function renderHardFallbackPage(input: {
+  code: string;
+  title: string;
+  summary: string;
+  requestUrl: string;
+  method: string;
+  details: Record<string, unknown>;
+}): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(input.title)}</title>
+    <style>
+      :root { --bg:#0b0f16; --panel:#141a24; --edge:#2b3444; --ink:#e8eefb; --dim:#9ba8c2; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body { background: var(--bg); color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif; padding: 16px; }
+      main { max-width: 980px; margin: 0 auto; background: var(--panel); border: 1px solid var(--edge); border-radius: 14px; padding: 14px; }
+      .code { display: inline-block; border: 1px solid var(--edge); border-radius: 999px; padding: 4px 10px; font: 600 12px ui-monospace, Menlo, monospace; color: #ffb09a; }
+      h1 { margin: 10px 0 6px; font-size: 22px; }
+      p { margin: 0 0 12px; color: var(--dim); }
+      pre { margin: 0; border: 1px solid var(--edge); border-radius: 10px; background: #0a0e16; padding: 10px; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="code">${escapeHtml(input.code)}</span>
+      <h1>${escapeHtml(input.title)}</h1>
+      <p>${escapeHtml(input.summary)}</p>
+      <pre>${escapeHtml(JSON.stringify({
+        method: input.method,
+        requestUrl: input.requestUrl,
+        details: input.details,
+        generatedAt: new Date().toISOString()
+      }, null, 2))}</pre>
+    </main>
+  </body>
+</html>`;
+}
+
+function escapeHtml(input: string): string {
+  return input
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
