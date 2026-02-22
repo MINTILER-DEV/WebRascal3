@@ -42,7 +42,12 @@ function build(meta: URLMeta): RewriterLike {
   };
 
   void meta;
-  return new ctor(cfg);
+  try {
+    return new ctor(cfg);
+  } catch (err) {
+    console.warn("[webrascal] wasm rewriter unavailable, falling back to pass-through:", err);
+    return new PassThroughRewriter();
+  }
 }
 
 export function getRewriter(meta: URLMeta): [RewriterLike, () => void] {
