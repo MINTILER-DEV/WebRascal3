@@ -1,5 +1,6 @@
 import type { MessageC2W, MessageW2C, WebrascalConfig } from "../types";
 import { CookieStore } from "../shared/cookie";
+import { loadCodecs, setConfig } from "../shared";
 import { rewriteUrl, unrewriteUrl } from "../shared/rewriters/url";
 import { handleFetch } from "./fetch";
 import { FakeServiceWorker } from "./fakesw";
@@ -62,11 +63,13 @@ export class WebrascalServiceWorker extends EventTarget {
         decode: "(input) => atob(input)"
       }
     };
+    this.applySharedConfig(this.config);
 
     self.addEventListener("message", (ev: ExtendableMessageEvent) => {
       const data = ev.data as MessageW2C;
       if (data?.webrascal$type === "loadConfig") {
         this.config = data.config;
+        this.applySharedConfig(this.config);
       }
       if (data?.webrascal$type === "cookieSync") {
         this.cookieStore.load(data.cookies);
@@ -85,6 +88,16 @@ export class WebrascalServiceWorker extends EventTarget {
 
   async loadConfig(): Promise<void> {
     return;
+  }
+
+  private applySharedConfig(config: WebrascalConfig): void {
+    try {
+      setConfig(config);
+      loadCodecs();
+    } catch (err) {
+      // Keep SW alive with pass-through codecs when config payload is invalid.
+      console.warn("[webrascal] failed to initialize shared config in worker:", err);
+    }
   }
 
   async dispatch(client: Client, data: MessageW2C): Promise<MessageC2W> {
