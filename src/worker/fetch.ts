@@ -2,7 +2,7 @@ import type { URLMeta } from "../types";
 import { rewriteCss, rewriteHeaders, rewriteHtml, rewriteJs, rewriteWorkers, unrewriteUrl, rewriteUrl } from "../shared/rewriters";
 import { cleanExpiredTrackers, getMostRestrictiveSite, initializeTracker, storeReferrerPolicy, updateTracker } from "../shared/security/forceReferrer";
 import type { WebrascalServiceWorker } from "./index";
-import { renderErrorPage, type RefraktErrorPageInput } from "./error";
+import { renderErrorPage, renderNetErrorPage, type NetErrorPageInput } from "./error";
 
 export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent): Promise<Response> {
   const request = event.request;
@@ -21,26 +21,12 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
 
     const realUrl = unrewriteUrl(request.url);
     if (realUrl.startsWith(self.location.origin)) {
-      return errorResponse(400, {
-        code: "RFK-SAFE-1001",
-        title: "Blocked Same-Origin Escape",
-        summary: "A proxied route tried to resolve to the app origin, which is blocked by policy.",
-        status: 400,
-        method: request.method,
-        requestUrl: request.url,
-        realUrl,
-        destination: request.destination,
-        details: {
-          workerOrigin: self.location.origin,
-          prefix: sw.config.prefix,
-          note: "This guard prevents proxied pages from escaping the proxy boundary."
-        },
-        tips: [
-          "Ensure the iframe navigates through controller.encodeUrl().",
-          "Verify codec encode/decode output is stable for the requested target URL.",
-          "Do not feed same-origin app routes into /webrascal/ URLs."
-        ]
-      });
+      return simpleErrorResponse(
+        400,
+        "A proxied route resolved to the app origin and was blocked by policy.",
+        "WRK-SAFE-1001",
+        "Blocked Same-Origin Escape"
+      );
     }
 
     const meta: URLMeta = { base: new URL(realUrl) };
@@ -70,8 +56,8 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         redirect: "manual"
       });
     } catch (err) {
-      return errorResponse(502, {
-        code: "RFK-NET-2001",
+      return netErrorResponse(502, {
+        code: "WRK-NET-2001",
         title: "Upstream Fetch Failed",
         summary: "The worker could not reach the target URL through the configured transport.",
         status: 502,
@@ -98,8 +84,8 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         ? (await upstream.text()).slice(0, 4000)
         : `<binary payload ${upstream.status}>`;
 
-      return errorResponse(502, {
-        code: "RFK-NET-2002",
+      return netErrorResponse(502, {
+        code: "WRK-NET-2002",
         title: "Proxy Upstream Returned Server Error",
         summary: "The transport endpoint returned a 5xx response while fetching the target URL.",
         status: upstream.status,
@@ -161,29 +147,25 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       headers: rewrittenHeaders
     });
   } catch (err) {
-    return errorResponse(500, {
-      code: "RFK-CORE-5000",
-      title: "Unhandled Worker Pipeline Error",
-      summary: "The fetch rewrite pipeline threw unexpectedly while handling this proxied request.",
-      status: 500,
-      method: request.method,
-      requestUrl: request.url,
-      destination: request.destination,
-      details: {
-        error: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined
-      },
-      tips: [
-        "Check worker bundle version and rebuild to clear stale caches.",
-        "Open the full diagnostic payload and inspect the failing stage.",
-        "If this is reproducible, report the error code and request URL."
-      ]
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    return simpleErrorResponse(
+      500,
+      `The worker fetch pipeline failed unexpectedly. ${message}`,
+      "WRK-CORE-5000",
+      "Unhandled Worker Pipeline Error"
+    );
   }
 }
 
-function errorResponse(status: number, payload: RefraktErrorPageInput): Response {
-  return new Response(renderErrorPage(payload), {
+function simpleErrorResponse(status: number, summary: string, code: string, title: string): Response {
+  return new Response(renderErrorPage(summary, code, title), {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8" }
+  });
+}
+
+function netErrorResponse(status: number, payload: NetErrorPageInput): Response {
+  return new Response(renderNetErrorPage(payload), {
     status,
     headers: { "content-type": "text/html; charset=utf-8" }
   });
