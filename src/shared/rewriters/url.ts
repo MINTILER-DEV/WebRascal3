@@ -3,6 +3,11 @@ import type { URLMeta } from "../../types";
 import { rewriteJs } from "./js";
 
 const PASSTHROUGH_PROTOCOLS = new Set(["mailto:", "about:", "tel:"]);
+const DEFAULT_PREFIX = "/webrascal/";
+
+function prefix(): string {
+  return config?.prefix || DEFAULT_PREFIX;
+}
 
 export function rewriteUrl(input: string | URL, meta: URLMeta): string {
   const raw = typeof input === "string" ? input : input.toString();
@@ -17,7 +22,7 @@ export function rewriteUrl(input: string | URL, meta: URLMeta): string {
   }
 
   if (raw.startsWith("blob:") || raw.startsWith("data:")) {
-    return `${location.origin}${config.prefix}${raw}`;
+    return `${location.origin}${prefix()}${raw}`;
   }
 
   let resolved: URL;
@@ -31,7 +36,7 @@ export function rewriteUrl(input: string | URL, meta: URLMeta): string {
     return resolved.toString();
   }
 
-  return `${config.prefix}${codecEncode(resolved.toString())}`;
+  return `${prefix()}${codecEncode(resolved.toString())}`;
 }
 
 export function unrewriteUrl(input: string): string {
@@ -40,16 +45,18 @@ export function unrewriteUrl(input: string): string {
   }
 
   if (input.startsWith("blob:") || input.startsWith("data:")) {
-    const idx = input.indexOf(config.prefix);
+    const p = prefix();
+    const idx = input.indexOf(p);
     if (idx >= 0) {
-      return input.slice(idx + config.prefix.length);
+      return input.slice(idx + p.length);
     }
     return input;
   }
 
-  if (input.startsWith(config.prefix)) {
+  if (input.startsWith(prefix())) {
     try {
-      return codecDecode(input.slice(config.prefix.length));
+      const p = prefix();
+      return codecDecode(input.slice(p.length));
     } catch {
       return input;
     }
@@ -57,8 +64,9 @@ export function unrewriteUrl(input: string): string {
 
   try {
     const url = new URL(input, location.href);
-    if (url.pathname.startsWith(config.prefix)) {
-      return codecDecode(url.pathname.slice(config.prefix.length));
+    if (url.pathname.startsWith(prefix())) {
+      const p = prefix();
+      return codecDecode(url.pathname.slice(p.length));
     }
   } catch {
     return input;
