@@ -30,7 +30,8 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         400,
         "A proxied route resolved to the app origin and was blocked by policy.",
         "WRK-SAFE-1001",
-        "Blocked Same-Origin Escape"
+        "Blocked Same-Origin Escape",
+        request.destination
       );
     }
 
@@ -84,7 +85,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
           "Check that the host process can reach the target over HTTPS.",
           "Inspect the dev server terminal for low-level network errors."
         ]
-      });
+      }, request.destination);
     }
 
     stage = "upstream-error-status-check";
@@ -112,7 +113,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
           "If using HTTPS targets, check certificate and DNS reachability from Node.",
           "Retry with a simpler target URL to isolate transport vs rewrite issues."
         ]
-      });
+      }, request.destination);
     }
 
     stage = "rewrite-headers";
@@ -197,28 +198,45 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
           "Confirm no stale service worker version is active.",
           "Use the stage field to identify where the pipeline threw."
         ]
-      });
+      }, request.destination);
     }
     return simpleErrorResponse(
       500,
       `The worker fetch pipeline failed unexpectedly at stage "${stage}". ${message}`,
       "WRK-CORE-5000",
-      "Unhandled Worker Pipeline Error"
+      "Unhandled Worker Pipeline Error",
+      request.destination
     );
   }
 }
 
-function simpleErrorResponse(status: number, summary: string, code: string, title: string): Response {
+function simpleErrorResponse(
+  status: number,
+  summary: string,
+  code: string,
+  title: string,
+  destination: RequestDestination
+): Response {
+  const responseStatus = toRenderableStatus(status, destination);
   return new Response(renderErrorPage(summary, code, title), {
-    status,
-    headers: { "content-type": "text/html; charset=utf-8" }
+    status: responseStatus,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "x-webrascal-error-code": code,
+      "x-webrascal-error-status": String(status)
+    }
   });
 }
 
-function netErrorResponse(status: number, payload: NetErrorPageInput): Response {
+function netErrorResponse(status: number, payload: NetErrorPageInput, destination: RequestDestination): Response {
+  const responseStatus = toRenderableStatus(status, destination);
   return new Response(renderNetErrorPage(payload), {
-    status,
-    headers: { "content-type": "text/html; charset=utf-8" }
+    status: responseStatus,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "x-webrascal-error-code": payload.code,
+      "x-webrascal-error-status": String(status)
+    }
   });
 }
 
@@ -238,4 +256,11 @@ function normalizeStatus(status: number): number {
     return status;
   }
   return 502;
+}
+
+function toRenderableStatus(status: number, destination: RequestDestination): number {
+  if (destination === "document" || destination === "iframe") {
+    return 200;
+  }
+  return status;
 }
