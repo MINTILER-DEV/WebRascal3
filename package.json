@@ -6,7 +6,8 @@
   "scripts": {
     "build": "rspack build",
     "dev": "rspack build --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "serve": "node scripts/dev-server.mjs"
   },
   "dependencies": {
     "@mercuryworkshop/bare-mux": "^2.1.6",

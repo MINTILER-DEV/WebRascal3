@@ -9,9 +9,18 @@ export type BareClientLike = {
   fetch(input: string, init?: RequestInit): Promise<Response>;
 };
 
+const DEV_PROXY_ENDPOINT = "/__refrakt_proxy__";
+
 class DefaultBareClient implements BareClientLike {
   fetch(input: string, init?: RequestInit): Promise<Response> {
-    return fetch(input, init);
+    const proxyUrl = `${DEV_PROXY_ENDPOINT}?url=${encodeURIComponent(input)}`;
+    const headers = new Headers(init?.headers);
+    headers.set("x-webrascal-target", input);
+    return fetch(proxyUrl, {
+      ...init,
+      headers,
+      redirect: init?.redirect ?? "manual"
+    });
   }
 }
 
