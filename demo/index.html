@@ -23,6 +23,16 @@
     <script src="/dist/webrascal.controller.js"></script>
     <script>
       (async () => {
+        if ("serviceWorker" in navigator) {
+          const registration = await navigator.serviceWorker.register("/webrascal.worker.js", { scope: "/" });
+          await navigator.serviceWorker.ready;
+          if (!navigator.serviceWorker.controller) {
+            location.reload();
+            return;
+          }
+          void registration;
+        }
+
         const { WebrascalController } = self.$webrascalLoadController();
         const controller = new WebrascalController({ prefix: "/webrascal/" });
         await controller.init();
