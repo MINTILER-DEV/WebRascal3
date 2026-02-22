@@ -8,12 +8,37 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
   const request = event.request;
   let stage = "start";
   let resolvedRealUrl = "";
+  const checkpoints: string[] = ["start"];
+  const traceId = createTraceId();
+  const traceEnabled = Boolean(sw.config?.flags?.rewriterLogs);
+
+  const mark = (nextStage: string, extra?: Record<string, unknown>): void => {
+    stage = nextStage;
+    checkpoints.push(nextStage);
+    if (traceEnabled) {
+      console.info(`[webrascal][trace:${traceId}] reached ${nextStage}`, {
+        requestUrl: request.url,
+        mode: request.mode,
+        destination: request.destination,
+        realUrl: resolvedRealUrl || undefined,
+        ...extra
+      });
+    }
+  };
+
+  const withTrace = (details: Record<string, unknown>): Record<string, unknown> => ({
+    traceId,
+    stage,
+    checkpoints: [...checkpoints],
+    ...details
+  });
 
   try {
-    stage = "parse-request-url";
+    mark("parse-request-url");
     const requestUrl = new URL(request.url);
 
     if (requestUrl.pathname.endsWith(".wasm") && requestUrl.pathname.includes("webrascal")) {
+      mark("wasm-shortcut");
       const fetched = await fetch(request);
       const buffer = await fetched.arrayBuffer();
       const b64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
@@ -22,7 +47,7 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       });
     }
 
-    stage = "decode-proxied-url";
+    mark("decode-proxied-url");
     const realUrl = unrewriteUrl(request.url);
     resolvedRealUrl = realUrl;
     if (realUrl.startsWith(self.location.origin)) {
@@ -32,15 +57,17 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         "WRK-SAFE-1001",
         "Blocked Same-Origin Escape",
         request.destination,
-        request.mode
+        request.mode,
+        stage,
+        traceId
       );
     }
 
-    stage = "prepare-upstream-request";
+    mark("prepare-upstream-request");
     const meta: URLMeta = { base: new URL(realUrl) };
     const headers = new Headers(request.headers);
 
-    stage = "tracker";
+    mark("tracker");
     try {
       const referrer = request.referrer || "";
       const initialSite = "cross-site";
@@ -51,13 +78,13 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       // ignore tracker failures
     }
 
-    stage = "attach-cookies";
+    mark("attach-cookies");
     const cookies = sw.cookieStore.getCookies(new URL(realUrl));
     if (cookies) {
       headers.set("cookie", cookies);
     }
 
-    stage = "upstream-fetch";
+    mark("upstream-fetch");
     let upstream: Response;
     try {
       upstream = await sw.client.fetch(realUrl, {
@@ -76,20 +103,20 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         requestUrl: request.url,
         realUrl,
         destination: request.destination,
-        details: {
+        details: withTrace({
           error: err instanceof Error ? err.message : String(err),
           stack: err instanceof Error ? err.stack : undefined,
           transport: "default client via same-origin dev proxy endpoint"
-        },
+        }),
         tips: [
           "Start the custom dev server (`npm run serve`) instead of a static server.",
           "Check that the host process can reach the target over HTTPS.",
           "Inspect the dev server terminal for low-level network errors."
         ]
-      }, request.destination, request.mode);
+      }, request.destination, request.mode, stage, traceId);
     }
 
-    stage = "upstream-error-status-check";
+    mark("upstream-error-status-check", { upstreamStatus: upstream.status });
     if (upstream.status >= 500) {
       const contentType = upstream.headers.get("content-type") || "";
       const payload = await safeBodyPreview(upstream, contentType);
@@ -103,72 +130,72 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         requestUrl: request.url,
         realUrl,
         destination: request.destination,
-        details: {
+        details: withTrace({
           upstreamStatus: upstream.status,
           upstreamStatusText: upstream.statusText,
           upstreamContentType: contentType,
           upstreamBodyPreview: payload
-        },
+        }),
         tips: [
           "Verify the proxy endpoint (`/__refrakt_proxy__`) is healthy.",
           "If using HTTPS targets, check certificate and DNS reachability from Node.",
           "Retry with a simpler target URL to isolate transport vs rewrite issues."
         ]
-      }, request.destination, request.mode);
+      }, request.destination, request.mode, stage, traceId);
     }
 
-    stage = "rewrite-headers";
+    mark("rewrite-headers");
     const rewrittenHeaders = rewriteHeaders(upstream.headers, meta);
 
-    stage = "redirect-handling";
+    mark("redirect-handling");
     const locationHeader = upstream.headers.get("location");
     if (locationHeader) {
       rewrittenHeaders.set("location", rewriteUrl(locationHeader, meta));
       await updateTracker(realUrl, locationHeader, upstream.headers.get("referrer-policy") || "");
     }
 
-    stage = "cookie-sync";
+    mark("cookie-sync");
     const setCookies = upstream.headers.get("set-cookie");
     if (setCookies) {
       sw.cookieStore.setCookies([setCookies], new URL(realUrl));
     }
 
-    stage = "referrer-policy";
+    mark("referrer-policy");
     const referrerPolicy = upstream.headers.get("referrer-policy");
     if (referrerPolicy) {
       await storeReferrerPolicy(realUrl, referrerPolicy, request.referrer);
     }
 
-    stage = "rewrite-body";
+    mark("rewrite-body");
     const contentType = upstream.headers.get("content-type") || "";
     const destination = request.destination;
     const isNavigatingDocument = destination === "document" || destination === "iframe" || request.mode === "navigate";
     const isHtml = contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 
-    stage = "rewrite-body:read-upstream-buffer";
+    mark("rewrite-body:read-upstream-buffer");
     let bodyBytes = new Uint8Array(await upstream.arrayBuffer());
     if (isNavigatingDocument && isHtml) {
-      stage = "rewrite-body:decode-html-text";
+      mark("rewrite-body:decode-html-text");
       const html = new TextDecoder().decode(bodyBytes);
-      stage = "rewrite-body:html";
+      mark("rewrite-body:html");
       bodyBytes = new TextEncoder().encode(rewriteHtml(html, meta, true));
     } else if (destination === "script") {
-      stage = "rewrite-body:js";
+      mark("rewrite-body:js");
       bodyBytes = new TextEncoder().encode(rewriteJs(bodyBytes, realUrl, meta, requestUrl.searchParams.get("type") === "module"));
     } else if (destination === "style") {
-      stage = "rewrite-body:decode-css-text";
+      mark("rewrite-body:decode-css-text");
       const css = new TextDecoder().decode(bodyBytes);
-      stage = "rewrite-body:css";
+      mark("rewrite-body:css");
       bodyBytes = new TextEncoder().encode(rewriteCss(css, meta));
     } else if (destination === "worker" || destination === "sharedworker") {
-      stage = "rewrite-body:worker";
+      mark("rewrite-body:worker");
       bodyBytes = rewriteWorkers(bodyBytes, destination as "worker" | "sharedworker", realUrl, meta);
     }
 
-    stage = "cleanup";
+    mark("cleanup");
     await cleanExpiredTrackers();
 
-    stage = "respond";
+    mark("respond");
     const status = normalizeStatus(upstream.status);
     const statusText = status === upstream.status
       ? upstream.statusText
@@ -191,17 +218,16 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
         requestUrl: request.url,
         realUrl: resolvedRealUrl,
         destination: request.destination,
-        details: {
-          stage,
+        details: withTrace({
           error: message,
           stack: err instanceof Error ? err.stack : undefined
-        },
+        }),
         tips: [
           "Re-check dev transport endpoint and TLS settings (`npm run serve:insecure` for local testing).",
           "Confirm no stale service worker version is active.",
           "Use the stage field to identify where the pipeline threw."
         ]
-      }, request.destination, request.mode);
+      }, request.destination, request.mode, stage, traceId);
     }
     return simpleErrorResponse(
       500,
@@ -209,7 +235,9 @@ export async function handleFetch(sw: WebrascalServiceWorker, event: FetchEvent)
       "WRK-CORE-5000",
       "Unhandled Worker Pipeline Error",
       request.destination,
-      request.mode
+      request.mode,
+      stage,
+      traceId
     );
   }
 }
@@ -220,7 +248,9 @@ function simpleErrorResponse(
   code: string,
   title: string,
   destination: RequestDestination,
-  mode: RequestMode
+  mode: RequestMode,
+  stage: string,
+  traceId: string
 ): Response {
   const responseStatus = toRenderableStatus(status, destination, mode);
   return new Response(renderErrorPage(summary, code, title), {
@@ -228,7 +258,9 @@ function simpleErrorResponse(
     headers: {
       "content-type": "text/html; charset=utf-8",
       "x-webrascal-error-code": code,
-      "x-webrascal-error-status": String(status)
+      "x-webrascal-error-status": String(status),
+      "x-webrascal-stage": stage,
+      "x-webrascal-trace-id": traceId
     }
   });
 }
@@ -237,7 +269,9 @@ function netErrorResponse(
   status: number,
   payload: NetErrorPageInput,
   destination: RequestDestination,
-  mode: RequestMode
+  mode: RequestMode,
+  stage: string,
+  traceId: string
 ): Response {
   const responseStatus = toRenderableStatus(status, destination, mode);
   return new Response(renderNetErrorPage(payload), {
@@ -245,7 +279,9 @@ function netErrorResponse(
     headers: {
       "content-type": "text/html; charset=utf-8",
       "x-webrascal-error-code": payload.code,
-      "x-webrascal-error-status": String(status)
+      "x-webrascal-error-status": String(status),
+      "x-webrascal-stage": stage,
+      "x-webrascal-trace-id": traceId
     }
   });
 }
@@ -273,4 +309,8 @@ function toRenderableStatus(status: number, destination: RequestDestination, mod
     return 200;
   }
   return status;
+}
+
+function createTraceId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }

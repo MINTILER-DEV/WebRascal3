@@ -124,9 +124,33 @@ export class WebrascalServiceWorker extends EventTarget {
 
 const sw = new WebrascalServiceWorker();
 self.addEventListener("fetch", (ev: FetchEvent) => {
-  if (sw.route(ev)) {
+  const reqUrl = new URL(ev.request.url);
+  const routed = sw.route(ev);
+  const traceEnabled = Boolean(sw.config?.flags?.rewriterLogs);
+  const maybeProxyPath = reqUrl.pathname.includes(sw.config.prefix) || reqUrl.pathname.includes("/webrascal/");
+
+  if (traceEnabled || maybeProxyPath) {
+    console.info("[webrascal][route] reached route check", {
+      requestUrl: ev.request.url,
+      pathname: reqUrl.pathname,
+      mode: ev.request.mode,
+      destination: ev.request.destination,
+      prefix: sw.config.prefix,
+      routed
+    });
+  }
+
+  if (routed) {
     ev.respondWith(
       sw.fetch(ev).catch((err) => {
+        if (traceEnabled || maybeProxyPath) {
+          console.error("[webrascal][route] reached top-level fetch rejection", {
+            requestUrl: ev.request.url,
+            mode: ev.request.mode,
+            destination: ev.request.destination,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
         const destination = ev.request.destination;
         const status = destination === "document" || destination === "iframe" || ev.request.mode === "navigate" ? 200 : 502;
         try {
@@ -140,6 +164,7 @@ self.addEventListener("fetch", (ev: FetchEvent) => {
               requestUrl: ev.request.url,
               destination,
               details: {
+                checkpoint: "top-level-fetch-catch",
                 error: err instanceof Error ? err.message : String(err),
                 stack: err instanceof Error ? err.stack : undefined
               },
